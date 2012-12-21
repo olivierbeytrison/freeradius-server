@@ -221,9 +221,9 @@ static rlm_cache_entry_t *cache_find(rlm_cache_t *inst, REQUEST *request,
 static rlm_cache_entry_t *cache_add(rlm_cache_t *inst, REQUEST *request,
 				    const char *key)
 {
-	int ttl;
-	const char *attr, *p;
-	VALUE_PAIR *vp, **vps;
+	int ttl, vp_op;
+	const char *p, *value;
+	VALUE_PAIR *vp, *vp_req, **vps;
 	CONF_ITEM *ci;
 	CONF_PAIR *cp;
 	rlm_cache_entry_t *c;
@@ -261,7 +261,9 @@ static rlm_cache_entry_t *cache_add(rlm_cache_t *inst, REQUEST *request,
 		rad_assert(cf_item_is_pair(ci));
 
 		cp = cf_itemtopair(ci);
-		attr = p = cf_pair_attr(cp);
+		p = cf_pair_attr(cp);
+		value = cf_pair_value(cp);
+		vp_op = cf_pair_operator(cp);
 		
 		switch (radius_list_name(&p, PAIR_LIST_REQUEST))
 		{
@@ -281,19 +283,52 @@ static rlm_cache_entry_t *cache_add(rlm_cache_t *inst, REQUEST *request,
 				rad_assert(0); 
 				return NULL;		
 		}
-
-		/*
-		 *	Repeat much of cf_pairtovp here...
-		 *	but we take list prefixes, and it doesn't.
-		 *	I don't want to make that change for 2.0.
-		 */
-		radius_xlat(buffer, sizeof(buffer), cf_pair_value(cp),
-			    request, NULL, NULL);
-
-		vp = pairmake(p, buffer, cf_pair_operator(cp));
-		pairadd(vps, vp);
+		
+		switch (cf_pair_value_type(cp))
+		{
+			case T_BARE_WORD:
+				/* Break if we don't find the attribute in request */
+				if ((radius_get_vp(request, value, &vp_req) < 0)) {
+					break;
+				}
+				if(vp_op == T_OP_SET) {
+					vp = paircopyvp(vp_req);
+					vp->operator = vp_op;
+					pairadd(vps,vp);
+				}
+				else if (vp_op == T_OP_ADD) {
+					while(vp_req) {
+						vp = paircopyvp(vp_req);
+						vp->operator =  vp_op;
+						pairadd(vps,vp);
+						vp_req = pairfind(vp_req->next,
+							vp_req->attribute,
+							vp_req->vendor);
+					}
+				}
+				else {
+					rad_assert(0);
+					DEBUG("rlm_cache : Invalid operator for bareword value in attribute %s",p);
+				}
+				break;
+			case T_SINGLE_QUOTED_STRING:
+				vp = pairmake(p,value,vp_op);
+				pairadd(vps,vp);
+				break;
+			case T_DOUBLE_QUOTED_STRING:
+				radius_xlat(buffer, sizeof(buffer), value,
+					request, NULL,NULL);
+				vp = pairmake(p, buffer, vp_op);
+				pairadd(vps,vp);
+				break;
+			default:
+				rad_assert(0);
+				DEBUG("rlm_cache: Invalid value for attribute %s",p);
+				return NULL;
+		}
+				
 	}
-
+	
 	if (!rbtree_insert(inst->cache, c)) {
 		DEBUG("rlm_cache: FAILED adding entry for key %s", key);
 		cache_entry_free(c);
