@@ -92,6 +92,22 @@ static void cache_entry_free(void *data)
 }
 
 /*
+ * Print attributes we add in the cache
+ */
+
+static void cache_entry_print(REQUEST *request, VALUE_PAIR *vp)
+{
+	char buffer[MAX_STRING_LEN];
+
+	if (debug_flag) {
+		vp_prints_value(buffer, sizeof(buffer), vp, 1);
+
+		RDEBUG("Added cache entry %s %s %s", vp->name,
+			 fr_int2str(fr_tokens, vp->operator, "¿unknown?"), buffer);
+	}
+}
+
+/*
  *	Compare two entries by expiry time.  There may be multiple
  *	entries with the same expiry time.
  */
@@ -187,7 +203,7 @@ static rlm_cache_entry_t *cache_find(rlm_cache_t *inst, REQUEST *request,
 	if ((c->expires < request->timestamp) ||
 	    (c->created < inst->epoch)) {
 	delete:
-		DEBUG("rlm_cache: Entry has expired, removing");
+		RDEBUG("Entry has expired, removing");
 
 		fr_heap_extract(inst->heap, c);
 		rbtree_deletebydata(inst->cache, c);
@@ -195,7 +211,7 @@ static rlm_cache_entry_t *cache_find(rlm_cache_t *inst, REQUEST *request,
 		return NULL;
 	}
 
-	DEBUG("rlm_cache: Found entry for \"%s\"", key);
+	RDEBUG("Found entry for \"%s\"", key);
 
 	/*
 	 *	Update the expiry time based on the TTL.
@@ -207,7 +223,7 @@ static rlm_cache_entry_t *cache_find(rlm_cache_t *inst, REQUEST *request,
 		
 		ttl = vp->vp_integer;
 		c->expires = request->timestamp + ttl;
-		DEBUG("rlm_cache: Adding %d to the TTL", ttl);
+		RDEBUG("rlm_cache: Adding %d to the TTL", ttl);
 	}
 	c->hits++;
 
@@ -294,12 +310,14 @@ static rlm_cache_entry_t *cache_add(rlm_cache_t *inst, REQUEST *request,
 				if(vp_op == T_OP_SET) {
 					vp = paircopyvp(vp_req);
 					vp->operator = vp_op;
+					cache_entry_print(request,vp);
 					pairadd(vps,vp);
 				}
 				else if (vp_op == T_OP_ADD) {
 					while(vp_req) {
 						vp = paircopyvp(vp_req);
 						vp->operator =  vp_op;
+						cache_entry_print(request,vp);
 						pairadd(vps,vp);
 						vp_req = pairfind(vp_req->next,
 							vp_req->attribute,
@@ -308,40 +326,42 @@ static rlm_cache_entry_t *cache_add(rlm_cache_t *inst, REQUEST *request,
 				}
 				else {
 					rad_assert(0);
-					DEBUG("rlm_cache : Invalid operator for bareword value in attribute %s",p);
+					RDEBUG("Invalid operator for bareword value in attribute %s",p);
 				}
 				break;
 			case T_SINGLE_QUOTED_STRING:
 				vp = pairmake(p,value,vp_op);
+				cache_entry_print(request,vp);
 				pairadd(vps,vp);
 				break;
 			case T_DOUBLE_QUOTED_STRING:
 				radius_xlat(buffer, sizeof(buffer), value,
 					request, NULL,NULL);
 				vp = pairmake(p, buffer, vp_op);
+				cache_entry_print(request,vp);
 				pairadd(vps,vp);
 				break;
 			default:
 				rad_assert(0);
-				DEBUG("rlm_cache: Invalid value for attribute %s",p);
+				RDEBUG("Invalid value for attribute %s",p);
 				return NULL;
 		}
 				
 	}
 	
 	if (!rbtree_insert(inst->cache, c)) {
-		DEBUG("rlm_cache: FAILED adding entry for key %s", key);
+		RDEBUG("FAILED adding entry for key %s", key);
 		cache_entry_free(c);
 		return NULL;
 	}
 
 	if (!fr_heap_insert(inst->heap, c)) {
-		DEBUG("rlm_cache: FAILED adding entry for key %s", key);
+		RDEBUG("FAILED adding entry for key %s", key);
 		rbtree_deletebydata(inst->cache, c);
 		return NULL;
 	}
 
-	DEBUG("rlm_cache: Adding entry for \"%s\", with TTL of %d",
+	RDEBUG("Adding entry for \"%s\", with TTL of %d",
 	      key, ttl);
 
 	return c;
