@@ -714,6 +714,8 @@ fi
 %dir %attr(750,root,radiusd) /etc/raddb/mods-config/sql/main/oracle
 %attr(640,root,radiusd) %config(noreplace) /etc/raddb/mods-config/sql/main/oracle/*
 %endif
+%dir %attr(750,root,radiusd) /etc/raddb/local.d
+%attr(640,root,radiusd) %config(noreplace) /etc/raddb/local.d/*
 
 %files utils
 %defattr(-,root,root)
